@@ -8,8 +8,9 @@ import:
 	cp ../Bnf2Yip/yaml.yip yaml.yip
 
 test-diff: yaml2yeast_test
-	./yaml2yeast_test tests 2>&1 | grep -v passed | grep -v 'not implemented' | sed 's/.input: failed.*//;s/.*/clear ; diff -c &.output &.error | less' > diff.sh
-	/bin/sh diff.sh
+	rm -rf tests/*.error
+	./yaml2yeast_test tests 2>&1 | grep -v passed | grep -v 'not implemented' | sed 's/.input: failed.*//;s/.*/clear ; diff -c &.output &.error | less/' > diff.sh
+	cat diff.sh
 
 test-src: test_src test_src.sh
 	test_src.sh

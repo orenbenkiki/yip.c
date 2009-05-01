@@ -32,7 +32,7 @@ Tb
 s
 # B: 4, C: 4, L: 1, c: 4
 n
-# B: -1, C: -1, L: -1, c: -1
+# B: 4, C: 4, L: 1, c: 4
 !Expected start of line
 # B: 4, C: 4, L: 1, c: 4
 -:

@@ -114,7 +114,7 @@ typedef enum YIP_CODE {
     YIP_BEGIN_DOCUMENT   = 'O',  /* Begins document. */
     YIP_END_DOCUMENT     = 'o',  /* Ends document. */
     YIP_ERROR            = '!',  /* Parsing error. */
-    YIP_TEST             = '?'   /* Text matched by production tests. */
+    YIP_UNPARSED         = '-'   /* Unparsed text (due to error). */
 } YIP_CODE;
 
 /* The of each YEAST token code. */

@@ -90,12 +90,10 @@ SWITCH_ACTION(`empty_token(yip, YIP_`'translit($1, `a-z', `A-Z'))')
 
 define(`NEXT_CHAR', `
 TEST_ACTION(`next_char(yip)')
-divert(-1)
 ')
 
 define(`PREV_CHAR', `
 VOID_ACTION(`prev_char(yip)')
-divert(-1)
 ')
 
 define(`NEXT_LINE', `
@@ -104,7 +102,6 @@ VOID_ACTION(`next_line(yip)')
 
 define(`BEGIN_CHOICE', `
 TEST_ACTION(`begin_choice(yip, CHOICE_`'translit($1, `a-z', `A-Z'))')
-divert(-1)
 ')
 
 define(`END_CHOICE', `
@@ -127,6 +124,21 @@ define(`NON_POSITIVE_N', `
 SWITCH_ACTION(`non_positive_n(yip)')
 ')
 
+define(`PUSH_STATE', `
+TEST_ACTION(`push_state(yip)')
+')
+
+define(`SET_STATE', `
+VOID_ACTION(`set_state(yip)')
+')
+
+define(`POP_STATE', `
+VOID_ACTION(`pop_state(yip)')
+')
+
+define(`RESET_STATE', `
+VOID_ACTION(`reset_state(yip)')
+')
 
 define(`FAILURE', `
 divert(1)dnl
@@ -189,7 +201,7 @@ define(`TRANSITION_PREFIX', `            ')
 define(`START_OF_LINE', `
 define(`IS_ALWAYS', `NO')
 divert(1)dnl
-TRANSITION_PREFIX`'if (yip->is_start_of_line) {
+TRANSITION_PREFIX`'if (yip->frames->top->curr->is_start_of_line) {
 divert(-1)
 GOTO_STATE(`                ')
 divert(1)dnl
@@ -226,7 +238,7 @@ define(`BEGIN_CLASSES', `
 define(`IS_ALWAYS', `NO')
 define(`PREFIX', `')
 divert(1)dnl
-TRANSITION_PREFIX`'if ((1ll << yip->match->code) & (dnl
+TRANSITION_PREFIX`'if ((1ll << yip->frames->top->curr->match->code) & (dnl
 divert(-1)
 define(`TRANSITION_PREFIX', ` else ')
 ')

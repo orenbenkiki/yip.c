@@ -29,14 +29,17 @@ static char *set_suffix(char *path, const char *suffix) {
 
 static YIP_SOURCE *read_path(char *path) {
     YIP_SOURCE *source = yip_path_source(path);
-    int status;
-    while ((status = source->more(source, 8192))) {
-        if (status < 0) {
-            perror(path);
-            exit(1);
+    if (!source) return NULL;
+    else {
+        int status;
+        while ((status = source->more(source, 8192))) {
+            if (status < 0) {
+                perror(path);
+                exit(1);
+            }
         }
+        return source;
     }
-    return source;
 }
 
 static int are_identical(YIP_SOURCE *left, YIP_SOURCE *right) {
@@ -51,6 +54,7 @@ static void check_test_results(char *path) {
     if (!output_src) {
         missing++;
         fprintf(stderr, "unknown: missing output\n");
+        errno = 0;
         return;
     } else {
         YIP_SOURCE *error_src = read_path(set_suffix(path, ".error"));
