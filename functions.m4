@@ -129,10 +129,6 @@ define(`INCREMENT_COUNTER', `
 VOID_ACTION(`I++')
 ')
 
-define(`NON_POSITIVE_N', `
-TOKEN_ACTION(`non_positive_n(yip)', `$1')
-')
-
 define(`PUSH_STATE', `
 TEST_ACTION(`push_state(yip)')
 ')

@@ -1008,6 +1008,7 @@ static int next_char(YIP *yip) {
 }
 
 /* Move to the previous character. */
+/* TODO:
 static void prev_char(YIP *yip) {
     yip_invariant(yip);
     assert(Prev->code != NO_CODE);
@@ -1015,6 +1016,7 @@ static void prev_char(YIP *yip) {
     Token->end = Curr->begin;
     yip_invariant(yip);
 }
+*/
 
 /* Move to the next input line. */
 static void next_line(YIP *yip) {
@@ -1168,11 +1170,6 @@ static RETURN unexpected(YIP *yip) {
 /* Prevent further named backtracking. */
 static RETURN commit(YIP *yip, CHOICE choice) {
     return fake_token(yip, YIP_ERROR, choices_error[choice]);
-}
-
-/* Complain about impossible loops ("never happens"). */
-static RETURN non_positive_n(YIP *yip) {
-    return fake_token(yip, YIP_ERROR, "Fewer than 0 repetitions");
 }
 
 /* }}} */
