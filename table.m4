@@ -4,7 +4,7 @@ define(`BEGIN_CLASSIFICATION_TABLE', `
 define(`PREFIX', `')
 divert(1)dnl
 /* Low characters classification table. */
-static YIP_CODE low_char_class[$1] = {
+static long long low_char_mask[$1] = {
 divert(-1)
 ')
 
@@ -17,9 +17,15 @@ divert(-1)
 ')
 
 define(`LOW_CHAR_CLASS', `
+ifelse(`$1', `-1', `
 divert(1)dnl
-PREFIX    /* format(`%3d 0%3o 0x%2x', $1, $1, $1) */ ifelse(`$2', `-1', `NO_CODE', `$2')`'dnl
+PREFIX    /* format(`%3d     EOF   ', $1) */ ifelse(`$2', `-1', `0', `1ll << $2')`'dnl
 divert(-1)
+', `
+divert(1)dnl
+PREFIX    /* format(`%3d 0o%03o 0x%02x', $1, $1, $1) */ ifelse(`$2', `-1', `0', `1ll << $2')`'dnl
+divert(-1)
+')
 define(`PREFIX', `,
 ')
 ')

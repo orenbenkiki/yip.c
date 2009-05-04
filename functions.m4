@@ -15,7 +15,7 @@ define(`BEGIN_MACHINE', `
 divert(1)dnl
 static RETURN $2(YIP *yip) {
     for (;;) {
-        switch (yip->state) {
+        switch (State) {
 divert(-1)
 ')
 
@@ -39,16 +39,18 @@ divert(-1)
 ifelse($1, `0', `', `
 divert(1)dnl
         state_$1:
+            yip_invariant(yip);
 divert(-1)
 ')
 define(`WHEN_DONE', `assert(0);')
 ')
 
-define(`SWITCH_ACTION', `
+define(`TOKEN_ACTION', `
 divert(1)dnl
-            yip->state = STATE_INDEX;
             switch ($1) {
             case RETURN_TOKEN:
+                State = $2;
+                yip_invariant(yip);
                 return RETURN_TOKEN;
             case RETURN_DONE:
                 break;
@@ -56,6 +58,8 @@ divert(1)dnl
                 assert(0);
                 errno = EFAULT;
             case RETURN_ERROR:
+                State = STATE_INDEX;
+                yip_invariant(yip);
                 return RETURN_ERROR;
             }
 divert(-1)
@@ -64,7 +68,8 @@ divert(-1)
 define(`TEST_ACTION', `
 divert(1)dnl
             if ($1 < 0) {
-                yip->state = STATE_INDEX;
+                State = STATE_INDEX;
+                yip_invariant(yip);
                 return RETURN_ERROR;
             }
 divert(-1)
@@ -77,15 +82,19 @@ divert(-1)
 ')
 
 define(`BEGIN_TOKEN', `
-SWITCH_ACTION(`begin_token(yip, YIP_`'translit($1, `a-z', `A-Z'))')
+TOKEN_ACTION(`begin_token(yip, YIP_`'translit($1, `a-z', `A-Z'))', `$2')
 ')
 
 define(`END_TOKEN', `
-SWITCH_ACTION(`end_token(yip, YIP_`'translit($1, `a-z', `A-Z'))')
+TOKEN_ACTION(`end_token(yip, YIP_`'translit($1, `a-z', `A-Z'))', `$2')
 ')
 
 define(`EMPTY_TOKEN', `
-SWITCH_ACTION(`empty_token(yip, YIP_`'translit($1, `a-z', `A-Z'))')
+TOKEN_ACTION(`empty_token(yip, YIP_`'translit($1, `a-z', `A-Z'))', `$2')
+')
+
+define(`UNEXPECTED', `
+TOKEN_ACTION(`unexpected(yip)', `$1')
 ')
 
 define(`NEXT_CHAR', `
@@ -105,23 +114,23 @@ TEST_ACTION(`begin_choice(yip, CHOICE_`'translit($1, `a-z', `A-Z'))')
 ')
 
 define(`END_CHOICE', `
-SWITCH_ACTION(`end_choice(yip, CHOICE_`'translit($1, `a-z', `A-Z'))')
+TOKEN_ACTION(`end_choice(yip, CHOICE_`'translit($1, `a-z', `A-Z'))', `$2')
 ')
 
 define(`COMMIT', `
-SWITCH_ACTION(`commit(yip, CHOICE_`'translit($1, `a-z', `A-Z'))')
+TOKEN_ACTION(`commit(yip, CHOICE_`'translit($1, `a-z', `A-Z'))', `$2')
 ')
 
 define(`RESET_COUNTER', `
-VOID_ACTION(`yip->i = 0')
+VOID_ACTION(`I = 0')
 ')
 
 define(`INCREMENT_COUNTER', `
-VOID_ACTION(`yip->i++')
+VOID_ACTION(`I++')
 ')
 
 define(`NON_POSITIVE_N', `
-SWITCH_ACTION(`non_positive_n(yip)')
+TOKEN_ACTION(`non_positive_n(yip)', `$1')
 ')
 
 define(`PUSH_STATE', `
@@ -138,22 +147,6 @@ VOID_ACTION(`pop_state(yip)')
 
 define(`RESET_STATE', `
 VOID_ACTION(`reset_state(yip)')
-')
-
-define(`FAILURE', `
-divert(1)dnl
-            yip->state = STATE_INDEX;
-            return RETURN_UNEXPECTED;
-divert(-1)
-define(`WHEN_DONE', `')
-')
-
-define(`SUCCESS', `
-divert(1)dnl
-            yip->state = -1;
-            return RETURN_DONE;
-divert(-1)
-define(`WHEN_DONE', `')
 ')
 
 define(`BEGIN_TRANSITIONS', `
@@ -198,22 +191,10 @@ define(`TRANSITION_PREFIX', `            ')
 ')
 ')
 
-define(`START_OF_LINE', `
-define(`IS_ALWAYS', `NO')
-divert(1)dnl
-TRANSITION_PREFIX`'if (yip->frames->top->curr->is_start_of_line) {
-divert(-1)
-GOTO_STATE(`                ')
-divert(1)dnl
-            }dnl
-divert(-1)
-define(`TRANSITION_PREFIX', ` else ')
-')
-
 define(`COUNTER_LESS_THAN_N', `
 define(`IS_ALWAYS', `NO')
 divert(1)dnl
-TRANSITION_PREFIX`'if (yip->i < yip->n) {
+TRANSITION_PREFIX`'if (I < N) {
 divert(-1)
 GOTO_STATE(`                ')
 divert(1)dnl
@@ -225,7 +206,7 @@ define(`TRANSITION_PREFIX', ` else ')
 define(`COUNTER_LESS_EQUAL_N', `
 define(`IS_ALWAYS', `NO')
 divert(1)dnl
-TRANSITION_PREFIX`'if (yip->i <= yip->n) {
+TRANSITION_PREFIX`'if (I <= N) {
 divert(-1)
 GOTO_STATE(`                ')
 divert(1)dnl
@@ -238,7 +219,7 @@ define(`BEGIN_CLASSES', `
 define(`IS_ALWAYS', `NO')
 define(`PREFIX', `')
 divert(1)dnl
-TRANSITION_PREFIX`'if ((1ll << yip->frames->top->curr->match->code) & (dnl
+TRANSITION_PREFIX`'if (Curr_char->mask & (dnl
 divert(-1)
 define(`TRANSITION_PREFIX', ` else ')
 ')
@@ -262,7 +243,6 @@ divert(-1)
 
 define(`GOTO_STATE', `
 divert(1)dnl
-$1`'/* yip->state = TARGET_STATE; */
 $1`'goto state_`'TARGET_STATE;
 divert(-1)
 ')

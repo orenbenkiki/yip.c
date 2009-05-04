@@ -65,7 +65,8 @@ extern YIP_SOURCE *yip_path_source(const char *path);
 typedef enum YIP_ENCODING {
     YIP_UTF8,
     YIP_UTF16LE, YIP_UTF16BE,
-    YIP_UTF32LE, YIP_UTF32BE
+    YIP_UTF32LE, YIP_UTF32BE,
+    YIP_ENCODING_SIGNED = -1  /* Force it to be signed. */
 } YIP_ENCODING;
 
 /* Returns name of the encoding (e.g. "UTF8"). */
@@ -114,14 +115,17 @@ typedef enum YIP_CODE {
     YIP_BEGIN_DOCUMENT   = 'O',  /* Begins document. */
     YIP_END_DOCUMENT     = 'o',  /* Ends document. */
     YIP_ERROR            = '!',  /* Parsing error. */
-    YIP_UNPARSED         = '-'   /* Unparsed text (due to error). */
+    YIP_UNPARSED         = '-',  /* Unparsed text (due to error). */
+    YIP_CODE_SIGNED      = -1    /* Force it to be signed. */
 } YIP_CODE;
 
 /* The of each YEAST token code. */
 typedef enum YIP_CODE_TYPE {
-  YIP_BEGIN,                    /* Token begins a group of tokens. */
-  YIP_END,                      /* Token ends a group of tokens. */
-  YIP_MATCH                     /* Token matches some input characters. */
+    YIP_BEGIN,                    /* Token begins a group of tokens. */
+    YIP_END,                      /* Token ends a group of tokens. */
+    YIP_MATCH,                    /* Token matches some input characters. */
+    YIP_FAKE,                     /* Token contains non-input characters. */
+    YIP_CODE_TYPE_SIGNED = -1     /* Force it to be signed. */
 } YIP_CODE_TYPE;
 
 /* Returns type of a YEAST token code. */
@@ -160,9 +164,14 @@ extern int yip_free(YIP *yip);
 /* Return the next parsed token, or Null with errno. */
 extern const YIP_TOKEN *yip_next_token(YIP *yip);
 
-/* Decode a single charcter from a buffer. Returns the unicode code point or -1
- * with errno. The begin pointer is repositioned to after the decoded
- * character. */
+/* Decode a single charcter from a buffer. The begin pointer is repositioned to
+ * after the decoded bytes. Returns the unicode code point, or a negative
+ * number if encountering an invalid byte sequence (further call may recover).
+ * The caller is responsible for ensuring there is a sufficient number of bytes
+ * available for this to work (6 bytes for UTF8, 4 bytes for UTF16 and UTF32).
+ * TODO: Provide yip_decode_2, yip_decode_utf8_2, ... variants that return
+ * 16-bit characters (using UTF16 surrogate pairs), to supports code that
+ * doesn't recognize Unicode is a 32-bit character set. */
 extern int yip_decode(YIP_ENCODING encoding,
                       const unsigned char **begin, const unsigned char *end);
 extern int yip_decode_utf8(const unsigned char **begin, const unsigned char *end);
@@ -170,5 +179,6 @@ extern int yip_decode_utf16le(const unsigned char **begin, const unsigned char *
 extern int yip_decode_utf16be(const unsigned char **begin, const unsigned char *end);
 extern int yip_decode_utf32le(const unsigned char **begin, const unsigned char *end);
 extern int yip_decode_utf32be(const unsigned char **begin, const unsigned char *end);
+
 
 #endif /* YIP_H */

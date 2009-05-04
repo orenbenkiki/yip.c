@@ -92,22 +92,16 @@ static void run_test_file(YIP *yip, char *path) {
                 token->byte_offset, token->char_offset,
                 token->line, token->line_char);
         fputc(token->code, error_fp);
-        if (token->code == YIP_ERROR && token->end - token->begin <= 8) {
-            fputs("Unexpected '", error_fp);
-        }
         if (token->begin) {
             unsigned const char *begin = token->begin;
             while (begin != token->end) {
                 int code = yip_decode(token->encoding, &begin, token->end);
                 assert(code >= 0);
-                if (' ' <= code && code != '\\' && code <= '~') fputc(code, error_fp);
+                if (' ' <= code && (token->code == YIP_ERROR || code != '\\') && code <= '~') fputc(code, error_fp);
                 else if (code <= 0xFF)   fprintf(error_fp, "\\x%02x", code);
                 else if (code <= 0xFFFF) fprintf(error_fp, "\\u%04x", code);
                 else                     fprintf(error_fp, "\\U%08x", code);
             }
-        }
-        if (token->code == YIP_ERROR && token->end - token->begin <= 8) {
-              fputs("'", error_fp);
         }
         fputc('\n', error_fp);
     }
