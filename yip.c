@@ -22,10 +22,10 @@
 #define numof(ARRAY) (int)(sizeof(ARRAY) / sizeof(ARRAY[0]))
 
 /* Works for anything with begin and end members. */
-#define sizeoff(PTR)  ((PTR)->end - (PTR)->begin)
+#define size_of(PTR)  ((PTR)->end - (PTR)->begin)
 
 /* Works for anything with begin, end and byte_offset members. */
-#define endoff(PTR)   ((PTR)->byte_offset + sizeoff(PTR))
+#define end_offset(PTR)   ((PTR)->byte_offset + size_of(PTR))
 
 /* Special values. */
 #define EOF_CODE      (-1)
@@ -49,7 +49,7 @@ static YIP_SOURCE *source_invariant(const YIP_SOURCE *source) {
     } else {
         assert(source->byte_offset >= 0);
         assert(source->end);
-        assert(source->end >= source->begin);
+        assert(size_of(source) >= 0);
     }
     return (YIP_SOURCE *)source;
 }
@@ -71,7 +71,7 @@ static int buffer_less(YIP_SOURCE *source, int size) {
         return -1;
     } else {
         source_invariant(source);
-        if (size > sizeoff(source)) {
+        if (size > size_of(source)) {
             errno = EINVAL;
             return -1;
         }
@@ -188,7 +188,7 @@ static int dynamic_less(YIP_SOURCE *common, int size) {
         return -1;
     } else {
         DYNAMIC_SOURCE *source = dynamic_invariant(common);
-        long data_size = sizeoff(common);
+        long data_size = size_of(common);
         if (size > data_size) {
             errno = EINVAL;
             return -1;
@@ -448,10 +448,10 @@ const char *yip_encoding_name(YIP_ENCODING encoding) {
 static int detect_encoding(YIP_SOURCE *source) {
     if (source->more(source, 4) < 0) return -1;
     else {
-        unsigned char byte_0    = (sizeoff(source) > 0 ? source->begin[0] : 0xAA);
-        unsigned char byte_1    = (sizeoff(source) > 1 ? source->begin[1] : 0xAA);
-        unsigned char byte_2    = (sizeoff(source) > 2 ? source->begin[2] : 0xAA);
-        unsigned char byte_3    = (sizeoff(source) > 3 ? source->begin[3] : 0xAA);
+        unsigned char byte_0    = (size_of(source) > 0 ? source->begin[0] : 0xAA);
+        unsigned char byte_1    = (size_of(source) > 1 ? source->begin[1] : 0xAA);
+        unsigned char byte_2    = (size_of(source) > 2 ? source->begin[2] : 0xAA);
+        unsigned char byte_3    = (size_of(source) > 3 ? source->begin[3] : 0xAA);
         unsigned long byte_01   = (byte_0 << 8)  |  byte_1;
         unsigned long byte_012  = (byte_0 << 16) | (byte_1 << 8)  |  byte_2;
         unsigned long byte_123  =                  (byte_1 << 16) | (byte_2 << 8) | byte_3;
@@ -541,6 +541,12 @@ typedef void (*STACK_FUNCTION)(void *data, void *element);
 /* Size of element in a typed stack. */
 #define STACK_TYPE_SIZE(STACK) sizeof(*(STACK)->begin)
 
+/* Number of used elements in a (typed) stack. */
+#define depth_of(STACK) (1 + (STACK)->top - (STACK)->begin)
+
+/* Offset of top element in a stack. */
+#define top_offset(STACK) ((char *)(STACK)->top - (char *)(STACK)->begin)
+
 /* Untyped stack for generic code. */
 TYPEDEF_STACK(void, VOID_STACK);
 
@@ -566,8 +572,8 @@ static void generic_stack_invariant(const VOID_STACK *stack, size_t type_size, S
     assert(stack->top);
     assert(stack->begin <= stack->top);
     assert(stack->top < stack->end);
-    assert(!((stack->end - stack->begin) % type_size));
-    assert(!((stack->top - stack->begin) % type_size));
+    assert(!(size_of(stack) % type_size));
+    assert(!(top_offset(stack) % type_size));
     if (invariant) generic_stack_apply(stack, type_size, invariant, data);
     else           assert(!data);
 }
@@ -595,13 +601,13 @@ static void generic_stack_free(VOID_STACK *stack, size_t type_size) {
 }
 
 /* Allocate space for a new uninitialized top element. Return 0 or -1 with errno. */
-#define stack_more(STACK) \
-    generic_stack_more((VOID_STACK *)(STACK), STACK_TYPE_SIZE(STACK))
-static int generic_stack_more(VOID_STACK *stack, size_t type_size) {
+#define stack_push(STACK) \
+    generic_stack_push((VOID_STACK *)(STACK), STACK_TYPE_SIZE(STACK))
+static int generic_stack_push(VOID_STACK *stack, size_t type_size) {
     generic_stack_invariant(stack, type_size, NULL, NULL);
     stack->top += type_size;
     if (stack->top == stack->end) {
-        int size = sizeoff(stack);
+        int size = size_of(stack);
         stack->begin = realloc(stack->begin, 2 * size);
         if (!stack->begin) return -1;
         stack->top = stack->begin + size;
@@ -611,15 +617,31 @@ static int generic_stack_more(VOID_STACK *stack, size_t type_size) {
     return 0;
 }
 
-/* Release top element. Must not pop the bottom-most element.
-#define stack_less(STACK) \
-    generic_stack_less((VOID_STACK *)(STACK), STACK_TYPE_SIZE(STACK))
-static void generic_stack_less(VOID_STACK *stack, size_t type_size) {
+/* Release top element. Must not release the bottom-most element. */
+#define stack_pop(STACK) \
+    generic_stack_pop((VOID_STACK *)(STACK), STACK_TYPE_SIZE(STACK))
+static void generic_stack_pop(VOID_STACK *stack, size_t type_size) {
     generic_stack_invariant(stack, type_size, NULL, NULL);
-    assert(stack->top >= stack->begin);
+    assert(top_offset(stack) >= 0);
     stack->top -= type_size;
     generic_stack_invariant(stack, type_size, NULL, NULL);
-} TODO */
+}
+
+/* Release bottom elements. Must not release the top-most element.
+#define stack_shift(STACK, ELEMENTS) \
+    generic_stack_shift((VOID_STACK *)(STACK), STACK_TYPE_SIZE(STACK), ELEMENTS)
+static void generic_stack_shift(VOID_STACK *stack, size_t type_size, int elements) {
+    int shift_size = elements * type_size;
+    int tail_size = top_offset(stack) + type_size - shift_size;
+    generic_stack_invariant(stack, type_size, NULL, NULL);
+    assert(shift_size >= 0);
+    assert(shift_size >= type_size);
+    assert(!(shift_size % type_size));
+    assert(!(tail_size % type_size));
+    memmove(stack->begin, stack->begin + shift_size, tail_size);
+    stack->top = stack->begin + tail_size - type_size;
+    generic_stack_invariant(stack, type_size, NULL, NULL);
+} */
 
 /* Return from an action/machine invocation. */
 typedef enum RETURN {
@@ -659,7 +681,12 @@ typedef struct CHAR {
 typedef struct FRAME {
     CHAR prev[1];           /* Previous character. */
     CHAR curr[1];           /* Current character. */
+    int tokens_depth;       /* Depth of tokens stack. */
+    int codes_depth;        /* Depth of codes stack. */
 } FRAME;
+
+/* Stack of nested token codes. */
+TYPEDEF_STACK(YIP_CODE, CODE_STACK);
 
 /* Stack of backtracking states. */
 TYPEDEF_STACK(FRAME, FRAME_STACK);
@@ -669,6 +696,7 @@ TYPEDEF_STACK(YIP_TOKEN, TOKEN_STACK);
 
 /* YIP parser object. */
 struct YIP {
+    CODE_STACK codes[1];      /* Stack of nested tokens. */
     TOKEN_STACK tokens[1];    /* Stack of collected tokens. */
     FRAME_STACK frames[1];    /* Stack for backtracking. */
     MACHINE machine;          /* State machine implementation. */
@@ -677,15 +705,14 @@ struct YIP {
     int to_close;             /* Whether to automatically close source. */
     int did_see_eof;          /* Did the source report EOF? */
     int state;                /* Current state. */
-    int nested_tokens;        /* Number of nested tokens. */
-    int first_return_token;   /* First token to return to caller. */
     int next_return_token;    /* Next token to return to caller. */
-    int is_test;              /* Running inside a test? */
     int i;                    /* Loops counter. */
     int n;                    /* Indentation level. */
 };
 
 /* Easy access of YIP members. */
+#define Codes (yip->codes)
+#define Code (*yip->codes->top)
 #define Tokens (yip->tokens)
 #define Token (yip->tokens->top)
 #define Frames (yip->frames)
@@ -700,10 +727,7 @@ struct YIP {
 #define To_close (yip->to_close)
 #define Did_see_eof (yip->did_see_eof)
 #define State (yip->state)
-#define Nested_tokens (yip->nested_tokens)
-#define First_return_token (yip->first_return_token)
 #define Next_return_token (yip->next_return_token)
-#define Is_test (yip->is_test)
 #define I (yip->i)
 #define N (yip->n)
 
@@ -723,22 +747,30 @@ static void token_invariant(const YIP *yip, const YIP_TOKEN *token) {
         assert(token->line >= 1);
         assert(token->line_char >= 0);
     }
-    assert(token->byte_offset <= Source->byte_offset + sizeoff(Source));
+    assert(token->byte_offset <= Source->byte_offset + size_of(Source));
     assert(token->char_offset <= token->byte_offset);
     assert(token->begin);
     if (token->begin == token->end) {
         if (is_char) assert(token->code == NO_CODE || token->code == EOF_CODE);
     } else {
-        assert(token->end > token->begin);
+        assert(size_of(token) > 0);
         if (is_char) assert(token->code >= 0 || token->code == INVALID_CODE);
         else         assert(' ' < token->code && token->code <= '~');
         if (is_char || yip_code_type(token->code) != YIP_FAKE) {
-            assert(token->byte_offset + sizeoff(token) <= Source->byte_offset + sizeoff(Source));
-            assert(token->encoding == yip->encoding);
+            assert(token->byte_offset + size_of(token) <= Source->byte_offset + size_of(Source));
+            assert(token->encoding == Encoding);
             assert(token->begin >= Source->begin);
             assert(token->end <= Source->end);
-            assert(token->byte_offset == Source->byte_offset + (token->begin - Source->begin));
+            assert(token->byte_offset - Source->byte_offset == token->begin - Source->begin);
         }
+    }
+    if (token->begin == Curr->begin && token->code != NO_CODE) {
+        assert(token->byte_offset == Curr->byte_offset);
+        assert(token->char_offset == Curr->char_offset);
+        assert(token->line == Curr->line);
+        assert(token->line_char == Curr->line_char);
+        assert(!size_of(token) || token->end == Curr->end);
+        assert(token->encoding == Encoding);
     }
 }
 
@@ -753,30 +785,39 @@ static void frame_invariant(const YIP *yip, const FRAME *frame) {
     token_invariant(yip, prev);
     is_char = 0;
     if (curr->begin == prev->begin) {
-        if (curr->end == curr->begin)      assert(prev->end == prev->begin);
-        else if (prev->end != prev->begin) assert(!memcmp(curr_char, prev_char, sizeof(*curr_char)));
+        if (!size_of(curr)) assert(!size_of(prev));
+        else if (size_of(prev)) assert(!memcmp(curr_char, prev_char, sizeof(*curr_char)));
+    }
+    if (frame == Frame) {
+        assert(frame->tokens_depth == -1);
+        assert(frame->codes_depth == -1);
+    } else {
+        assert(frame->tokens_depth > 0);
+        assert(frame->codes_depth > 0);
+        assert(frame->tokens_depth <= depth_of(Frames));
+        assert(frame->codes_depth <= depth_of(Codes));
     }
 }
 
+/*
 #define HERE fprintf(stderr, "%s: %d: %s:\n", __FILE__, __LINE__, __FUNCTION__)
+#define yip_invariant(Y) yip__invariant(Y, __FILE__, __LINE__, __FUNCTION__)
+*/
 
 /* Asserts invariant always held by parsers. */
-/*#define yip_invariant(Y) yip__invariant(Y, __FILE__, __LINE__,
- * __FUNCTION__)*/
 static void yip_invariant(const YIP *yip/*, const char *file, int line, const char *function*/) {
-    /*fprintf(stderr, "%s: %d: %s:\n", file, line, function);*/
+    /*fprintf(stderr, "%s: %d: %s:", file, line, function);*/
     assert(yip);
     assert(Source);
     assert(Machine);
     source_invariant(Source);
+    stack_invariant(Codes, NULL, NULL);
     stack_invariant(Tokens, token_invariant, yip);
     stack_invariant(Frames, frame_invariant, yip);
-    assert(Nested_tokens >= 0);
-    assert(Nested_tokens <= Tokens->top - Tokens->begin);
-    assert(!First_return_token == !Next_return_token);
-    assert(First_return_token >= 0);
-    assert(First_return_token <= Next_return_token);
-    assert(Next_return_token <= Tokens->top - Tokens->begin);
+    if (yip_code_type(Token->code) != YIP_FAKE) assert(Token->end == Curr->begin);
+    assert(Next_return_token <= depth_of(Tokens));
+    assert(Next_return_token >= 0 || Token->code == YIP_UNPARSED || Token->code == Code);
+    /*fprintf(stderr, " OK\n");*/
 }
 
 /* Consume the next byte from a buffer ending at "end" into a buffer starting at "*begin". */
@@ -937,28 +978,29 @@ int yip_decode(YIP_ENCODING encoding, const unsigned char **begin, const unsigne
 
 /* Data for rebasing buffers. */
 typedef struct REBASE {
-    const unsigned char *old_begin;   /* Original buffer start. */
-    const unsigned char *old_end;     /* Original buffer end (for asserions). */
-    const unsigned char *new_begin;   /* New buffer start. */
-    const unsigned char *new_end;     /* New buffer end (for asserions). */
+    struct {
+        const unsigned char *begin;     /* Original buffer start. */
+        const unsigned char *end;       /* Original buffer end (for asserions). */
+    } before[1],                  /* Before rebase. */
+    after[1];                     /* After rebase. */
 } REBASE;
 
 static void rebase_invariant(const REBASE *rebase) {
-    assert(rebase->old_begin != rebase->new_begin);
-    assert(rebase->old_begin && rebase->old_end);
-    assert(rebase->new_begin && rebase->new_end);
-    assert(rebase->old_begin < rebase->old_end);
-    assert(rebase->new_begin < rebase->new_end);
-    assert(rebase->new_end - rebase->new_begin > rebase->old_end - rebase->old_begin);
+    assert(rebase->before->begin != rebase->after->begin);
+    assert(rebase->before->begin && rebase->before->end);
+    assert(rebase->after->begin && rebase->after->end);
+    assert(rebase->before->begin < rebase->before->end);
+    assert(rebase->after->begin < rebase->after->end);
+    assert(size_of(rebase->after) > size_of(rebase->before));
 }
 
 /* Move a relative pointer to "the same place" after a buffer was reallocated to a new address. */
 static const unsigned char *rebase_pointer(const unsigned char *old_pointer, const REBASE *rebase) {
-    const unsigned char *new_pointer = rebase->new_begin + (old_pointer - rebase->old_begin);
+    const unsigned char *new_pointer = rebase->after->begin + (old_pointer - rebase->before->begin);
     assert(old_pointer);
     assert(new_pointer);
-    assert(rebase->old_begin <= old_pointer && old_pointer <= rebase->old_end);
-    assert(rebase->new_begin <= new_pointer && new_pointer <= rebase->new_end);
+    assert(rebase->before->begin <= old_pointer && old_pointer <= rebase->before->end);
+    assert(rebase->after->begin <= new_pointer && new_pointer <= rebase->after->end);
     return new_pointer;
 }
 
@@ -977,20 +1019,21 @@ static void rebase_frame(FRAME *frame, const REBASE *rebase) {
 /* Move to the next input character. */
 static int next_char(YIP *yip) {
     static const int MAX_UTF_SIZE = 6; /* UTF8 goes up to 6 bytes. */
-    REBASE rebase[1] = { { Source->begin, Source->end, NULL, NULL } };
-    yip_invariant(yip);
+    REBASE rebase[1] = { { { { Source->begin, Source->end } }, { { NULL, NULL } } } };
+    if (Curr->code != NO_CODE) yip_invariant(yip);
     if (Curr->code == EOF_CODE) return 0;
     assert(Token->end == Curr->begin);
+    assert(Token->code != NO_CODE || Curr->code == NO_CODE);
     *Prev_char = *Curr_char;
-    Curr->byte_offset += sizeoff(Curr);
+    Curr->byte_offset += size_of(Curr);
     Curr->char_offset++;
     Curr->line_char++;
     Curr->begin = Curr->end;
     Token->end = Curr->begin;
-    if (!Did_see_eof && Curr->byte_offset + MAX_UTF_SIZE > endoff(Source) && Source->more(Source, DYNAMIC_BUFFER_SIZE) < 0) return -1;
-    if (rebase->old_begin != Source->begin) {
-        rebase->new_begin = Source->begin;
-        rebase->new_end = Source->end;
+    if (!Did_see_eof && Curr->byte_offset + MAX_UTF_SIZE > end_offset(Source) && Source->more(Source, DYNAMIC_BUFFER_SIZE) < 0) return -1;
+    if (rebase->before->begin != Source->begin) {
+        rebase->after->begin = Source->begin;
+        rebase->after->end = Source->end;
         rebase_invariant(rebase);
         stack_apply(Tokens, rebase_token, rebase);
         stack_apply(Frames, rebase_frame, rebase);
@@ -1003,7 +1046,7 @@ static int next_char(YIP *yip) {
     }
     Curr_char->mask = code_mask(Curr->code);
     if ((Prev->code < 0 || Prev->code == 0xFFFF) && Prev_char->mask & START_OF_LINE_MASK) Curr_char->mask |= START_OF_LINE_MASK;
-    yip_invariant(yip);
+    if (Prev->code != NO_CODE) yip_invariant(yip);
     return 0;
 }
 
@@ -1026,150 +1069,235 @@ static void next_line(YIP *yip) {
 }
 
 /* Initialize YIP parser object. */
-static YIP *yip_init(YIP_SOURCE *source, int to_close,
-                     MACHINE machine, const YIP_PRODUCTION *production) {
+static YIP *yip_init(YIP_SOURCE *source, int to_close, MACHINE machine, const YIP_PRODUCTION *production) {
     if (!source || !machine) {
         errno = EINVAL;
         return NULL;
     } else {
         YIP *yip = (YIP *)calloc(sizeof(*yip), 1);
         if (!yip) return NULL;
-        Machine = machine;
-        Source = source;
-        To_close = to_close;
-        Is_test = !!production;
-        if (stack_init(Tokens, Is_test ? 1 : 128) < 0 || stack_init(Frames, Is_test ? 1 : 128) < 0) {
-            yip_free(yip);
-            return NULL;
-        }
-        I = NO_INDENT;
-        N = production && production->n ? atoi(production->n) : NO_INDENT;
-        if ((Encoding = detect_encoding(Source)) < 0) {
+        if ((Encoding = detect_encoding(source)) < 0) {
             errno = EILSEQ;
             yip_free(yip);
             return NULL;
-        } else {
-            Curr->byte_offset = 0;
-            Curr->char_offset = -1;
-            Curr->line = 1;
-            Curr->line_char = -1;
-            Curr->begin = Curr->end = Source->begin;
-            Curr->encoding = Encoding;
-            Curr->code = NO_CODE;
-            Curr_char->mask = START_OF_LINE_MASK;
-            *Prev_char = *Curr_char;
-            *Token = *Curr;
-            if (next_char(yip) < 0) {
-                yip_free(yip);
-                return NULL;
-            }
-            return yip;
         }
+        Source = source;
+        Machine = machine;
+        To_close = to_close;
+        Next_return_token = -1;
+        I = NO_INDENT;
+        N = production && production->n ? atoi(production->n) : NO_INDENT;
+        Encoding = detect_encoding(Source);
+        if (Encoding < 0
+         || stack_init(Codes, production ? 1 : 128) < 0
+         || stack_init(Tokens, production ? 1 : 128) < 0
+         || stack_init(Frames, production ? 1 : 128) < 0) {
+            yip_free(yip);
+            return NULL;
+        }
+        Code = YIP_UNPARSED;
+        Frame->tokens_depth = -1;
+        Frame->codes_depth = -1;
+        Curr->byte_offset = 0;
+        Curr->char_offset = -1;
+        Curr->line = 1;
+        Curr->line_char = -1;
+        Curr->begin = Curr->end = Source->begin;
+        Curr->encoding = Encoding;
+        Curr->code = NO_CODE;
+        Curr_char->mask = START_OF_LINE_MASK;
+        *Prev_char = *Curr_char;
+        *Token = *Curr;
+        if (next_char(yip) < 0) {
+            yip_free(yip);
+            return NULL;
+        }
+        *Token = *Curr;
+        Token->code = YIP_UNPARSED;
+        Token->end = Token->begin;
+        yip_invariant(yip);
+        return yip;
     }
 }
 
 /* Start collecting characters to a new token. */
 static RETURN begin_token(YIP *yip, YIP_CODE code) {
     yip_invariant(yip);
+    assert(Next_return_token < 0);
     assert(yip_code_type(code) == YIP_MATCH || code == YIP_BOM);
-    assert(Token->begin == Token->end);
-    assert(!First_return_token);
-    if (stack_more(Tokens) < 0) return RETURN_ERROR;
+    if (stack_push(Codes) < 0) return RETURN_ERROR;
+    Code = code;
+    if (Token->begin == Token->end) {
+        Token->code = code;
+        yip_invariant(yip);
+        return RETURN_DONE;
+    }
+    if (depth_of(Frames) == 1) {
+        assert(depth_of(Tokens) == 1);
+        Next_return_token = 0;
+        yip_invariant(yip);
+        return RETURN_TOKEN;
+    }
+    if (stack_push(Tokens) < 0) return RETURN_ERROR;
     *Token = *Curr;
-    Token->code = code;
     Token->end = Token->begin;
-    yip_invariant(yip);
+    Token->code = code;
     return RETURN_DONE;
 }
 
 /* End collecting characters to a token. */
 static RETURN end_token(YIP *yip, YIP_CODE code) {
     yip_invariant(yip);
-    assert(!First_return_token);
+    assert(Next_return_token < 0);
+    assert(code == Token->code || code == YIP_UNPARSED);
+    if (depth_of(Codes) == 1) assert(Code == YIP_UNPARSED);
+    else stack_pop(Codes);
     if (Token->begin == Token->end) {
-        Tokens->top--;
+        Token->code = Code;
         yip_invariant(yip);
         return RETURN_DONE;
     }
-    assert(code == Token->code || code == YIP_UNPARSED);
     Token->code = code;
     if (Token->code == YIP_BOM) {
         Token->begin = (const unsigned char *)encoding_names[Token->encoding] + 1;
         Token->end = Token->begin + strlen((const char *)Token->begin);
         Token->encoding = YIP_UTF8;
     }
-    First_return_token = Next_return_token = Token - Tokens->begin;
-    assert(Next_return_token);
-    yip_invariant(yip);
-    return RETURN_TOKEN;
-}
-
-/* Return an empty token to the caller. */
-static RETURN empty_token(YIP *yip, YIP_CODE code) {
-    yip_invariant(yip);
-    assert(!First_return_token);
-    assert(code == YIP_DONE || yip_code_type(code) == YIP_BEGIN || yip_code_type(code) == YIP_END);
-    if (stack_more(Tokens) < 0) return RETURN_ERROR;
+    if (depth_of(Frames) == 1) {
+        assert(depth_of(Tokens) == 1);
+        Next_return_token = 0;
+        yip_invariant(yip);
+        return RETURN_TOKEN;
+    }
+    if (stack_push(Tokens) < 0) return RETURN_ERROR;
     *Token = *Curr;
-    Token->code = code;
     Token->end = Token->begin;
-    First_return_token = Next_return_token = Token - Tokens->begin;
-    assert(Next_return_token);
+    Token->code = Code;
     yip_invariant(yip);
-    return RETURN_TOKEN;
+    return RETURN_DONE;
 }
 
 /* Return a fake token to the caller. */
 static RETURN fake_token(YIP *yip, YIP_CODE code, const char *text) {
     yip_invariant(yip);
-    assert(!First_return_token);
-    assert(yip_code_type(code) == YIP_FAKE);
-    if (stack_more(Tokens) < 0) return RETURN_ERROR;
-    *Token = *Curr;
+    assert(Next_return_token < 0);
+    if (text) assert(yip_code_type(code) == YIP_FAKE);
+    else      assert(code == YIP_DONE || yip_code_type(code) == YIP_BEGIN || yip_code_type(code) == YIP_END);
+    if (Token->begin != Token->end) {
+        if (stack_push(Tokens) < 0) return RETURN_ERROR;
+        *Token = *Curr;
+        Token->end = Token->begin;
+    }
     Token->code = code;
-    Token->begin = (const unsigned char *)text;
-    Token->end = Token->begin + strlen(text);
-    First_return_token = Next_return_token = Token - Tokens->begin;
-    assert(Next_return_token);
+    if (text) {
+        Token->begin = (const unsigned char *)text;
+        Token->end = Token->begin + strlen(text);
+    }
+    if (depth_of(Frames) == 1) {
+        assert(depth_of(Tokens) <= 2);
+        Next_return_token = 0;
+        yip_invariant(yip);
+        return RETURN_TOKEN;
+    }
+    if (stack_push(Tokens) < 0) return RETURN_ERROR;
+    *Token = *Curr;
+    Token->end = Token->begin;
+    Token->code = Code;
     yip_invariant(yip);
-    return RETURN_TOKEN;
+    return RETURN_DONE;
+}
+
+/* Return an empty token to the caller. */
+static RETURN empty_token(YIP *yip, YIP_CODE code) {
+    return fake_token(yip, code, NULL);
 }
 
 /* Return an error for an unexpected input character. */
 static RETURN unexpected(YIP *yip) {
-    static unsigned char buffer[24];
-    yip_invariant(yip);
-    assert(!First_return_token);
-    if (stack_more(Tokens) < 0) return RETURN_ERROR;
-    *Token = *Curr;
-    Token->code = YIP_ERROR;
-    if (Curr->code == INVALID_CODE) Token->begin = (const unsigned char *)"Invalid byte sequence";
-    else if (Curr->code == EOF_CODE) Token->begin = (const unsigned char *)"Unexpected end of input";
-    else if (Curr->code == '\'') Token->begin = (const unsigned char *)"Unexpected \"'\"";
-    else if (' ' <= Curr->code && Curr->code <= '~') {
-        sprintf((char *)buffer, "Unexpected '%c'", Curr->code);
-        Token->begin = buffer;
-    } else if (Curr->code <= 0xFF) {
-        sprintf((char *)buffer, "Unexpected '\\x%02x'", Curr->code);
-        Token->begin = buffer;
-    } else if (Curr->code <= 0xFFFF) {
-        sprintf((char *)buffer, "Unexpected '\\u%04x'", Curr->code);
-        Token->begin = buffer;
-    } else {
-        sprintf((char *)buffer, "Unexpected '\\U%08x'", Curr->code);
-        Token->begin = buffer;
-    }
-    Token->encoding = YIP_UTF8;
-    Token->end = Token->begin + strlen((char *)Token->begin);
-    First_return_token = Next_return_token = Token - Tokens->begin;
-    assert(Next_return_token);
-    yip_invariant(yip);
-    return RETURN_TOKEN;
+    static char buffer[24];
+    if (Curr->code == INVALID_CODE) return fake_token(yip, YIP_ERROR, "Invalid byte sequence");
+    if (Curr->code == EOF_CODE)     return fake_token(yip, YIP_ERROR, "Unexpected end of input");
+    if (Curr->code == '\'')         return fake_token(yip, YIP_ERROR, "Unexpected \"'\"");
+    if (' ' <= Curr->code && Curr->code <= '~') sprintf((char *)buffer, "Unexpected '%c'", Curr->code);
+    else if (Curr->code <= 0xFF)                sprintf((char *)buffer, "Unexpected '\\x%02x'", Curr->code);
+    else if (Curr->code <= 0xFFFF)              sprintf((char *)buffer, "Unexpected '\\u%04x'", Curr->code);
+    else                                        sprintf((char *)buffer, "Unexpected '\\U%08x'", Curr->code);
+    return fake_token(yip, YIP_ERROR, buffer);
 }
 
 /* Prevent further named backtracking. */
 static RETURN commit(YIP *yip, CHOICE choice) {
     return fake_token(yip, YIP_ERROR, choices_error[choice]);
+}
+
+/* Push current state for backtracking. */
+static int push_state(YIP *yip) {
+    yip_invariant(yip);
+    assert(Token->begin == Token->end);
+    assert(Token->code == YIP_UNPARSED);
+    if (stack_push(Frames) < 0) return -1;
+    Frame[0] = Frame[-1];
+    Frame[-1].tokens_depth = depth_of(Tokens);
+    Frame[-1].codes_depth = depth_of(Codes);
+    yip_invariant(yip);
+    return 0;
+}
+
+/* Update the state for backtracking. */
+static RETURN set_state(YIP *yip) {
+    yip_invariant(yip);
+    assert(depth_of(Frames) > 1);
+    assert(Token->begin == Token->end);
+    assert(Token->code == YIP_UNPARSED);
+    Frame[-1] = Frame[0];
+    Frame[-1].codes_depth = depth_of(Codes);
+    if (depth_of(Frames) > 1 || depth_of(Tokens) == 1) {
+        Frame[-1].tokens_depth = depth_of(Tokens);
+        yip_invariant(yip);
+        return RETURN_DONE;
+    }
+    Frame[-1].tokens_depth = 1;
+    stack_pop(Tokens);
+    Next_return_token = 0;
+    yip_invariant(yip);
+    return RETURN_TOKEN;
+}
+
+/* Backtrack to a previous state. */
+static void reset_state(YIP *yip) {
+    yip_invariant(yip);
+    assert(Token->begin == Token->end);
+    assert(Token->code == YIP_UNPARSED);
+    assert(depth_of(Frames) > 1);
+    Frame[0] = Frame[-1];
+    Codes->top = Codes->begin + Frame->codes_depth - 1;
+    Token = Tokens->begin + Frame->tokens_depth - 1;
+    *Token = *Curr;
+    Token->end = Token->begin;
+    Token->code = Code;
+    Frame->tokens_depth = -1;
+    Frame->codes_depth = -1;
+    yip_invariant(yip);
+}
+
+/* End backtracking keeping the current state. */
+static RETURN pop_state(YIP *yip) {
+    yip_invariant(yip);
+    assert(Token->begin == Token->end);
+    assert(Token->code == YIP_UNPARSED);
+    assert(depth_of(Frames) > 1);
+    Frame[-1] = Frame[0];
+    Frame--;
+    Frame->tokens_depth = -1;
+    Frame->codes_depth = -1;
+    if (depth_of(Frames) > 1 || depth_of(Tokens) == 1) {
+        yip_invariant(yip);
+        return RETURN_DONE;
+    }
+    stack_pop(Tokens);
+    Next_return_token = 0;
+    yip_invariant(yip);
+    return RETURN_TOKEN;
 }
 
 /* }}} */
@@ -1209,8 +1337,7 @@ static MACHINE machine_by_name(const MACHINE_BY_NAME *by_name, const char *name,
 }
 
 /* Initialize a YIP parser object for a production with no parameters. */
-YIP *yip_test(YIP_SOURCE *source, int to_close,
-              const YIP_PRODUCTION *production) {
+YIP *yip_test(YIP_SOURCE *source, int to_close, const YIP_PRODUCTION *production) {
     const MACHINE_BY_NAME *by_name = machine_by_parameters(production);
     if (!by_name) {
         if (to_close) source->close(source);
@@ -1228,8 +1355,9 @@ YIP *yip_test(YIP_SOURCE *source, int to_close,
 /* Release a YIP parser object and release all allocated resources. */
 int yip_free(YIP *yip) {
     YIP_SOURCE *source = Source;
-    int to_close = yip->to_close;
+    int to_close = To_close;
     yip_invariant(yip);
+    stack_free(Codes);
     stack_free(Frames);
     stack_free(Tokens);
     free(yip);
@@ -1241,20 +1369,31 @@ int yip_free(YIP *yip) {
 static const YIP_TOKEN *next_token(YIP *yip) {
     const YIP_TOKEN *token = Tokens->begin + Next_return_token;
     yip_invariant(yip);
-    assert(Next_return_token);
+    assert(depth_of(Frames) == 1);
+    assert(Next_return_token >= 0);
+    if (token->code == YIP_DONE) return token;
     Next_return_token++;
-    if (token == Tokens->top) {
-        Tokens->top = Tokens->begin + First_return_token - 1;
-        First_return_token = Next_return_token = 0;
-    }
     yip_invariant(yip);
     return token;
+}
+
+/* Reset after returning the last token. */
+static void last_token(YIP *yip) {
+    yip_invariant(yip);
+    assert(depth_of(Frames) == 1);
+    Next_return_token = -1;
+    Token = Tokens->begin;
+    *Token = *Curr;
+    Token->end = Token->begin;
+    Token->code = Code;
+    yip_invariant(yip);
 }
 
 /* Return the next parsed token, or Null with errno. */
 const YIP_TOKEN *yip_next_token(YIP *yip) {
     yip_invariant(yip);
-    if (First_return_token > 0) return next_token(yip);
+    if (Next_return_token >= depth_of(Tokens)) last_token(yip);
+    else if (Next_return_token >= 0) return next_token(yip);
     switch ((*Machine)(yip)) {
     case RETURN_ERROR:
         return NULL;

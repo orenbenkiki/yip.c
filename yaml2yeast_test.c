@@ -85,12 +85,8 @@ static void run_test_file(YIP *yip, char *path) {
     }
     for (;;) {
         const YIP_TOKEN *token = yip_next_token(yip);
-        if (token->code == YIP_DONE) {
-            break;
-        }
-        fprintf(error_fp, "# B: %ld, C: %ld, L: %ld, c: %ld\n",
-                token->byte_offset, token->char_offset,
-                token->line, token->line_char);
+        if (token->code == YIP_DONE) break;
+        fprintf(error_fp, "# B: %ld, C: %ld, L: %ld, c: %ld\n", token->byte_offset, token->char_offset, token->line, token->line_char);
         fputc(token->code, error_fp);
         if (token->begin) {
             unsigned const char *begin = token->begin;
@@ -167,11 +163,8 @@ static void confirmed_test_file(char *path, char *file) {
 }
 
 static void candidate_test_file(const char *directory, char *file) {
-    if (*file == '.'
-     || strlen(file) < 6
-     || strcmp(file + strlen(file) - 6, ".input")) {
-        return;
-    } else {
+    if (*file == '.' || strlen(file) < 6 || strcmp(file + strlen(file) - 6, ".input")) return;
+    else {
         char *path = alloca(strlen(directory) + strlen(file) + 3);
         if (!path) {
             perror("alloca");
@@ -201,9 +194,7 @@ static void run_directory_tests(const char *path) {
 
 int main(int argc, char *argv[]) {
     int i;
-    for (i = 1; i < argc; i++) {
-        run_directory_tests(argv[i]);
-    }
+    for (i = 1; i < argc; i++) run_directory_tests(argv[i]);
     printf("Total %d, passed %d, failed %d, missing %d, not implemented %d\n",
            passed + failed + missing + unimplemented,
            passed, failed, missing, unimplemented);

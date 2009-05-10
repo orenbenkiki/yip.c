@@ -10,6 +10,7 @@ divert(-1)
 define(`LineFeed', `Line_Feed')
 define(`BeginEscape', `Begin_Escape')
 define(`EndEscape', `End_Escape')
+define(`LineFold', `Line_Fold')
 
 define(`BEGIN_MACHINE', `
 divert(1)dnl
@@ -36,7 +37,11 @@ define(`STATE_INDEX', `$1')
 divert(1)dnl
         case $1:
 divert(-1)
-ifelse($1, `0', `', `
+ifelse($1, `0', `
+divert(1)dnl
+            yip_invariant(yip);
+divert(-1)
+', `
 divert(1)dnl
         state_$1:
             yip_invariant(yip);
@@ -59,7 +64,6 @@ divert(1)dnl
                 errno = EFAULT;
             case RETURN_ERROR:
                 State = STATE_INDEX;
-                yip_invariant(yip);
                 return RETURN_ERROR;
             }
 divert(-1)
@@ -69,7 +73,6 @@ define(`TEST_ACTION', `
 divert(1)dnl
             if ($1 < 0) {
                 State = STATE_INDEX;
-                yip_invariant(yip);
                 return RETURN_ERROR;
             }
 divert(-1)
@@ -134,11 +137,11 @@ TEST_ACTION(`push_state(yip)')
 ')
 
 define(`SET_STATE', `
-VOID_ACTION(`set_state(yip)')
+TOKEN_ACTION(`set_state(yip)', `$1')
 ')
 
 define(`POP_STATE', `
-VOID_ACTION(`pop_state(yip)')
+TOKEN_ACTION(`pop_state(yip)', `$1')
 ')
 
 define(`RESET_STATE', `
