@@ -267,6 +267,9 @@ extern int yip_decode_utf32be(const unsigned char **begin, const unsigned char *
 
 /**
  * @addtogroup Sources
+ *
+ * @brief Abstract data type for byte sources for parsing.
+ *
  * @{
  */
 
@@ -522,6 +525,9 @@ extern YIP_SOURCE *yip_path_source(const char *path);
 
 /**
  * @addtogroup Tokens
+ *
+ * @brief Results of parsing.
+ *
  * @{
  */
 
@@ -659,6 +665,9 @@ typedef struct YIP_TOKEN {
 
 /**
  * @addtogroup Parsers
+ *
+ * @brief Convert @ref Sources to a stream of @ref Tokens.
+ *
  * @{
  */
 
