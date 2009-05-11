@@ -4,6 +4,9 @@ CFLAGS = -ansi -Wall -Wextra -g3
 
 all: test_src yaml2yeast_test
 
+doc: yip.h doxygen.configuration
+	doxygen doxygen.configuration
+
 import:
 	cp ../Bnf2Yip/yaml.yip yaml.yip
 
@@ -63,4 +66,4 @@ test_src.o: test_src.c yip.h
 	$(CC) $(CFLAGS) -c $(<)
 
 clean:
-	rm -rf *.o *.i test_src test_src.input test_src.output yaml2yeast_test
+	rm -rf *.o *.i test_src test_src.input test_src.output yaml2yeast_test html

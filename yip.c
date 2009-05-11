@@ -1,3 +1,25 @@
+/*
+ * Copyright (c) 2009 Oren Ben-Kiki
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to
+ * deal in the Software without restriction, including without limitation the
+ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ * sell copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ */
+
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -9,11 +31,7 @@
 #include <unistd.h>
 #include "yip.h"
 
-#define E_CT_
-#define O_CT_
-#define U_CT_
-#define X_CT_
-
+/* Isn't it lovely we all speak the same language? */
 #ifndef O_BINARY
 #   define O_BINARY 0
 #endif /* O_BINARY */
@@ -21,14 +39,10 @@
 /* Like sizeof but in elements. */
 #define numof(ARRAY) (int)(sizeof(ARRAY) / sizeof(ARRAY[0]))
 
-/* Works for anything with begin and end members. */
-#define size_of(PTR)  ((PTR)->end - (PTR)->begin)
-
-/* Works for anything with begin, end and byte_offset members. */
-#define end_offset(PTR)   ((PTR)->byte_offset + size_of(PTR))
+/* Works for everything with begin/end - both buffers and stacks. */
+#define size_of(BUFFER) ((BUFFER)->end - (BUFFER)->begin)
 
 /* Special values. */
-#define EOF_CODE      (-1)
 #define INVALID_CODE  (-1000)
 #define NO_CODE       (-2000)
 #define NO_INDENT     (-3000)
@@ -38,18 +52,25 @@
 
 /* {{{ */
 
+/* Buffers: */
+
 /* Byte sources: */
+
+/* Return the offset beyond the last available byte of the source. */
+static int end_offset(YIP_SOURCE *source) {
+    return source->byte_offset + size_of(source->buffer);
+}
 
 /* Returns cast buffered byte source. Also asserts invariant always held by buffered byte sources. */
 static YIP_SOURCE *source_invariant(const YIP_SOURCE *source) {
     assert(source);
-    if (!source->begin) {
+    if (!source->buffer->begin) {
         assert(!source->byte_offset);
-        assert(!source->end);
+        assert(!source->buffer->end);
     } else {
         assert(source->byte_offset >= 0);
-        assert(source->end);
-        assert(size_of(source) >= 0);
+        assert(source->buffer->end);
+        assert(size_of(source->buffer) >= 0);
     }
     return (YIP_SOURCE *)source;
 }
@@ -71,12 +92,12 @@ static int buffer_less(YIP_SOURCE *source, int size) {
         return -1;
     } else {
         source_invariant(source);
-        if (size > size_of(source)) {
+        if (size > size_of(source->buffer)) {
             errno = EINVAL;
             return -1;
         }
         source->byte_offset += size;
-        source->begin += size;
+        source->buffer->begin += size;
         source_invariant(source);
         return size;
     }
@@ -103,8 +124,8 @@ YIP_SOURCE *yip_buffer_source(const void *begin, const void *end) {
         source->more = buffer_more;
         source->less = buffer_less;
         source->close = buffer_close;
-        source->begin = begin;
-        source->end = end;
+        source->buffer->begin = begin;
+        source->buffer->end = end;
         source_invariant(source);
         return source;
     }
@@ -112,16 +133,14 @@ YIP_SOURCE *yip_buffer_source(const void *begin, const void *end) {
 
 /* Return new string buffered byte source. */
 YIP_SOURCE *yip_string_source(const char *string) {
-    if (!string) {
-        errno = EINVAL;
-        return NULL;
-    } else {
+    if (!string) return yip_buffer_source(NULL, NULL);
+    else {
         YIP_SOURCE *source = calloc(1, sizeof(*source));
         source->more = buffer_more;
         source->less = buffer_less;
         source->close = buffer_close;
-        source->begin = (const unsigned char *)string;
-        source->end = (const unsigned char *)string + strlen(string);
+        source->buffer->begin = (const unsigned char *)string;
+        source->buffer->end = (const unsigned char *)string + strlen(string);
         source_invariant(source);
         return source;
     }
@@ -144,13 +163,13 @@ typedef struct DYNAMIC_SOURCE {
 /* Returns cast dynamic buffered byte source. Also asserts invariant always held by dynamic buffered byte sources. */
 static DYNAMIC_SOURCE *dynamic_invariant(const YIP_SOURCE *common) {
     DYNAMIC_SOURCE *source = (DYNAMIC_SOURCE *)source_invariant(common);
-    if (!common->begin) {
+    if (!common->buffer->begin) {
         assert(!source->base);
         assert(!source->size);
     } else {
         assert(source->base);
-        assert(source->base <= common->begin);
-        assert(source->size >= common->end - source->base);
+        assert(source->base <= common->buffer->begin);
+        assert(source->size >= common->buffer->end - source->base);
     }
     return source;
 }
@@ -162,19 +181,19 @@ static int dynamic_more(YIP_SOURCE *common, int size) {
         return -1;
     } else {
         DYNAMIC_SOURCE *source = dynamic_invariant(common);
-        long used_size = common->end - source->base;
+        long used_size = common->buffer->end - source->base;
         long need_size = used_size + size;
         if (need_size <= source->size) {
             dynamic_invariant(common);
             return size;
         } else {
-            long gap_size = common->begin - source->base;
+            long gap_size = common->buffer->begin - source->base;
             long need_buffers = (need_size + DYNAMIC_BUFFER_SIZE - 1) / DYNAMIC_BUFFER_SIZE;
             source->size = need_buffers * DYNAMIC_BUFFER_SIZE;
             source->base = realloc((void *)source->base, source->size);
             if (!source->base) return -1;
-            common->begin = source->base + gap_size;
-            common->end = source->base + used_size;
+            common->buffer->begin = source->base + gap_size;
+            common->buffer->end = source->base + used_size;
             dynamic_invariant(common);
             return size;
         }
@@ -188,20 +207,20 @@ static int dynamic_less(YIP_SOURCE *common, int size) {
         return -1;
     } else {
         DYNAMIC_SOURCE *source = dynamic_invariant(common);
-        long data_size = size_of(common);
+        long data_size = size_of(common->buffer);
         if (size > data_size) {
             errno = EINVAL;
             return -1;
         }
-        common->begin += size;
+        common->buffer->begin += size;
         common->byte_offset += size;
         data_size -= size;
         /* Tricky: move data to start of buffer if it fits in the gap.
          * This allows using the faster memcpy (no overlap) and also ensures linear run-time costs. */
-        if (common->begin - source->base >= data_size) {
-            memcpy((void *)source->base, common->begin, data_size);
-            common->begin = source->base;
-            common->end = common->begin + data_size;
+        if (common->buffer->begin - source->base >= data_size) {
+            memcpy((void *)source->base, common->buffer->begin, data_size);
+            common->buffer->begin = source->base;
+            common->buffer->end = common->buffer->begin + data_size;
         }
         dynamic_invariant(common);
         return size;
@@ -232,9 +251,9 @@ static int fp_more(YIP_SOURCE *common, int size) {
     if (size < 0) return -1;
     else {
         FP_READ_SOURCE *source = fp_invariant(common);
-        size = fread((void *)common->end, 1, size, source->fp);
+        size = fread((void *)common->buffer->end, 1, size, source->fp);
         if (size < 0) return -1;
-        common->end += size;
+        common->buffer->end += size;
         fp_invariant(common);
         return size;
     }
@@ -258,10 +277,8 @@ static int fp_close(YIP_SOURCE *common) {
 
 /* Return new fp read buffered byte source. */
 YIP_SOURCE *yip_fp_source(FILE *fp, int to_close) {
-    if (!fp) {
-        errno = EINVAL;
-        return NULL;
-    } else {
+    if (!fp) return yip_buffer_source(NULL, NULL);
+    else {
         FP_READ_SOURCE *source = calloc(1, sizeof(*source));
         if (!source) return NULL;
         else {
@@ -301,9 +318,9 @@ static int fd_read_more(YIP_SOURCE *common, int size) {
     if (size < 0) return -1;
     else {
         FD_READ_SOURCE *source = fd_read_invariant(common);
-        size = read(source->fd, (void *)common->end, size);
+        size = read(source->fd, (void *)common->buffer->end, size);
         if (size < 0) return -1;
-        common->end += size;
+        common->buffer->end += size;
         fd_read_invariant(common);
         return size;
     }
@@ -327,10 +344,8 @@ static int fd_read_close(YIP_SOURCE *common) {
 
 /* Return new fd read buffered byte source. */
 YIP_SOURCE *yip_fd_read_source(int fd, int to_close) {
-    if (fd < 0) {
-        errno = EINVAL;
-        return NULL;
-    } else {
+    if (fd < 0) return yip_buffer_source(NULL, NULL);
+    else {
         FD_READ_SOURCE *source = calloc(1, sizeof(*source));
         if (!source) return NULL;
         else {
@@ -373,8 +388,8 @@ static int fd_mmap_close(YIP_SOURCE *common) {
         FD_MMAP_SOURCE *source = fd_mmap_invariant(common);
         int fd = source->fd;
         int to_close = source->to_close;
-        void *base = (void *)common->begin - common->byte_offset;
-        long size = (void *)common->end - base;
+        void *base = (void *)common->buffer->begin - common->byte_offset;
+        long size = (void *)common->buffer->end - base;
         free(source);
         if (munmap(base, size) < 0) return -1;
         if (to_close) return close(fd);
@@ -385,10 +400,8 @@ static int fd_mmap_close(YIP_SOURCE *common) {
 /* Return new fd map buffered byte source.
  * TODO: Also provide a Windows implementation. */
 YIP_SOURCE *yip_fd_map_source(int fd, int to_close) {
-    if (fd < 0) {
-        errno = EINVAL;
-        return NULL;
-    } else {
+    if (fd < 0) return yip_buffer_source(NULL, NULL);
+    else {
         long size = lseek(fd, 0, SEEK_END);
         if (size < 0) return NULL;
         else {
@@ -404,8 +417,8 @@ YIP_SOURCE *yip_fd_map_source(int fd, int to_close) {
                     common->more = buffer_more;
                     common->less = buffer_less;
                     common->close = fd_mmap_close;;
-                    common->begin = base;
-                    common->end = base + size;
+                    common->buffer->begin = base;
+                    common->buffer->end = base + size;
                     source->fd = fd;
                     source->to_close = to_close;
                     assert(fd_mmap_invariant(common) == source);
@@ -418,16 +431,21 @@ YIP_SOURCE *yip_fd_map_source(int fd, int to_close) {
 
 /* Return new fd buffered byte source using mmap or read. */
 YIP_SOURCE *yip_fd_source(int fd, int to_close) {
+    int saved_errno = errno;
     YIP_SOURCE *source = yip_fd_map_source(fd, to_close);
     if (source) return source;
-    errno = 0;
+    errno = saved_errno;
     return yip_fd_read_source(fd, to_close);
 }
 
 /* Return new path buffered byte source using mmap or read. */
 YIP_SOURCE *yip_path_source(const char *path) {
-    int fd = open(path, O_RDONLY|O_BINARY);
-    return yip_fd_source(fd, 1);
+    if (!path) return yip_buffer_source(NULL, NULL);
+    if (!strcmp(path, "-")) return yip_fd_source(0, 0);
+    else {
+        int fd = open(path, O_RDONLY|O_BINARY);
+        return yip_fd_source(fd, 1);
+    }
 }
 
 /* Name of each UTF encoding. */
@@ -437,7 +455,7 @@ static const char *encoding_names[] = {
 
 /* Returns name of the encoding (e.g. "UTF8"). */
 const char *yip_encoding_name(YIP_ENCODING encoding) {
-    if (encoding > numof(encoding_names)) {
+    if (encoding < 0 || numof(encoding_names) <= encoding) {
         errno = EINVAL;
         return NULL;
     }
@@ -448,10 +466,10 @@ const char *yip_encoding_name(YIP_ENCODING encoding) {
 static int detect_encoding(YIP_SOURCE *source) {
     if (source->more(source, 4) < 0) return -1;
     else {
-        unsigned char byte_0    = (size_of(source) > 0 ? source->begin[0] : 0xAA);
-        unsigned char byte_1    = (size_of(source) > 1 ? source->begin[1] : 0xAA);
-        unsigned char byte_2    = (size_of(source) > 2 ? source->begin[2] : 0xAA);
-        unsigned char byte_3    = (size_of(source) > 3 ? source->begin[3] : 0xAA);
+        unsigned char byte_0    = (size_of(source->buffer) > 0 ? source->buffer->begin[0] : 0xAA);
+        unsigned char byte_1    = (size_of(source->buffer) > 1 ? source->buffer->begin[1] : 0xAA);
+        unsigned char byte_2    = (size_of(source->buffer) > 2 ? source->buffer->begin[2] : 0xAA);
+        unsigned char byte_3    = (size_of(source->buffer) > 3 ? source->buffer->begin[3] : 0xAA);
         unsigned long byte_01   = (byte_0 << 8)  |  byte_1;
         unsigned long byte_012  = (byte_0 << 16) | (byte_1 << 8)  |  byte_2;
         unsigned long byte_123  =                  (byte_1 << 16) | (byte_2 << 8) | byte_3;
@@ -472,54 +490,91 @@ static int detect_encoding(YIP_SOURCE *source) {
 /* Returns type of a YEAST token code. */
 YIP_CODE_TYPE yip_code_type(YIP_CODE code) {
     switch (code) {
-    case YIP_BEGIN_ESCAPE:
+    case YIP_BEGIN_ALIAS:
+    case YIP_BEGIN_ANCHOR:
     case YIP_BEGIN_COMMENT:
     case YIP_BEGIN_DIRECTIVE:
-    case YIP_BEGIN_TAG:
+    case YIP_BEGIN_DOCUMENT:
+    case YIP_BEGIN_ESCAPE:
     case YIP_BEGIN_HANDLE:
-    case YIP_BEGIN_ANCHOR:
-    case YIP_BEGIN_PROPERTIES:
-    case YIP_BEGIN_ALIAS:
-    case YIP_BEGIN_SCALAR:
-    case YIP_BEGIN_SEQUENCE:
     case YIP_BEGIN_MAPPING:
     case YIP_BEGIN_NODE:
     case YIP_BEGIN_PAIR:
-    case YIP_BEGIN_DOCUMENT:
+    case YIP_BEGIN_PROPERTIES:
+    case YIP_BEGIN_SCALAR:
+    case YIP_BEGIN_SEQUENCE:
+    case YIP_BEGIN_TAG:
         return YIP_BEGIN;
-    case YIP_END_ESCAPE:
+    case YIP_END_ALIAS:
+    case YIP_END_ANCHOR:
     case YIP_END_COMMENT:
     case YIP_END_DIRECTIVE:
-    case YIP_END_TAG:
+    case YIP_END_DOCUMENT:
+    case YIP_END_ESCAPE:
     case YIP_END_HANDLE:
-    case YIP_END_ANCHOR:
-    case YIP_END_PROPERTIES:
-    case YIP_END_ALIAS:
-    case YIP_END_SCALAR:
-    case YIP_END_SEQUENCE:
     case YIP_END_MAPPING:
     case YIP_END_NODE:
     case YIP_END_PAIR:
-    case YIP_END_DOCUMENT:
+    case YIP_END_PROPERTIES:
+    case YIP_END_SCALAR:
+    case YIP_END_SEQUENCE:
+    case YIP_END_TAG:
         return YIP_END;
-    case YIP_TEXT:
-    case YIP_META:
     case YIP_BREAK:
+    case YIP_DOCUMENT_END:
+    case YIP_DOCUMENT_START:
+    case YIP_INDENT:
+    case YIP_INDICATOR:
     case YIP_LINE_FEED:
     case YIP_LINE_FOLD:
-    case YIP_INDICATOR:
-    case YIP_WHITE:
-    case YIP_INDENT:
-    case YIP_DOCUMENT_START:
-    case YIP_DOCUMENT_END:
+    case YIP_META:
+    case YIP_TEXT:
     case YIP_UNPARSED:
+    case YIP_WHITE:
         return YIP_MATCH;
-    case YIP_DONE:
     case YIP_BOM:
+    case YIP_COMMENT:
+    case YIP_DONE:
     case YIP_ERROR:
         return YIP_FAKE;
     default:
-        assert(0);
+        errno = EINVAL;
+        return -1;
+    }
+}
+
+/* Returns the paired token code. */
+YIP_CODE yip_code_pair(YIP_CODE code) {
+    switch (code) {
+    case YIP_BEGIN_ALIAS:       return YIP_END_ALIAS;
+    case YIP_BEGIN_ANCHOR:      return YIP_END_ANCHOR;
+    case YIP_BEGIN_COMMENT:     return YIP_END_COMMENT;
+    case YIP_BEGIN_DIRECTIVE:   return YIP_END_DIRECTIVE;
+    case YIP_BEGIN_DOCUMENT:    return YIP_END_DOCUMENT;
+    case YIP_BEGIN_ESCAPE:      return YIP_END_ESCAPE;
+    case YIP_BEGIN_HANDLE:      return YIP_END_HANDLE;
+    case YIP_BEGIN_MAPPING:     return YIP_END_MAPPING;
+    case YIP_BEGIN_NODE:        return YIP_END_NODE;
+    case YIP_BEGIN_PAIR:        return YIP_END_PAIR;
+    case YIP_BEGIN_PROPERTIES:  return YIP_END_PROPERTIES;
+    case YIP_BEGIN_SCALAR:      return YIP_END_SCALAR;
+    case YIP_BEGIN_SEQUENCE:    return YIP_END_SEQUENCE;
+    case YIP_BEGIN_TAG:         return YIP_END_TAG;
+    case YIP_END_ALIAS:         return YIP_BEGIN_ALIAS;
+    case YIP_END_ANCHOR:        return YIP_BEGIN_ANCHOR;
+    case YIP_END_COMMENT:       return YIP_BEGIN_COMMENT;
+    case YIP_END_DIRECTIVE:     return YIP_BEGIN_DIRECTIVE;
+    case YIP_END_DOCUMENT:      return YIP_BEGIN_DOCUMENT;
+    case YIP_END_ESCAPE:        return YIP_BEGIN_ESCAPE;
+    case YIP_END_HANDLE:        return YIP_BEGIN_HANDLE;
+    case YIP_END_MAPPING:       return YIP_BEGIN_MAPPING;
+    case YIP_END_NODE:          return YIP_BEGIN_NODE;
+    case YIP_END_PAIR:          return YIP_BEGIN_PAIR;
+    case YIP_END_PROPERTIES:    return YIP_BEGIN_PROPERTIES;
+    case YIP_END_SCALAR:        return YIP_BEGIN_SCALAR;
+    case YIP_END_SEQUENCE:      return YIP_BEGIN_SEQUENCE;
+    case YIP_END_TAG:           return YIP_BEGIN_TAG;
+    default:
         errno = EINVAL;
         return -1;
     }
@@ -593,9 +648,9 @@ static int generic_stack_init(VOID_STACK *stack, size_t type_size, int init_size
 }
 
 /* Release all resources used by a stack. */
-#define stack_free(STACK) \
-    generic_stack_free((VOID_STACK *)(STACK), STACK_TYPE_SIZE(STACK))
-static void generic_stack_free(VOID_STACK *stack, size_t type_size) {
+#define stack_close(STACK) \
+    generic_stack_close((VOID_STACK *)(STACK), STACK_TYPE_SIZE(STACK))
+static void generic_stack_close(VOID_STACK *stack, size_t type_size) {
     generic_stack_invariant(stack, type_size, NULL, NULL);
     free(stack->begin);
 }
@@ -723,6 +778,7 @@ struct YIP {
 #define Prev (yip->frames->top->prev->token)
 #define Machine (yip->machine)
 #define Source (yip->source)
+#define Buffer (yip->source->buffer)
 #define Encoding (yip->encoding)
 #define To_close (yip->to_close)
 #define Did_see_eof (yip->did_see_eof)
@@ -736,41 +792,51 @@ struct YIP {
 
 /* {{{ */
 
-/* Ugly hack for distinguishing between real token and char token invariants. */
-static int is_char = 0;
-
-/* Assert invariant always held by tokens. */
-static void token_invariant(const YIP *yip, const YIP_TOKEN *token) {
+/* Assert invariant always held by tokens (or characaters posing as tokens). */
+static void token_char_invariant(const YIP *yip, const YIP_TOKEN *token) {
     assert(token->byte_offset >= 0);
     if (token->code != NO_CODE) {
         assert(token->char_offset >= 0);
         assert(token->line >= 1);
         assert(token->line_char >= 0);
     }
-    assert(token->byte_offset <= Source->byte_offset + size_of(Source));
+    assert(token->byte_offset <= Source->byte_offset + size_of(Buffer));
     assert(token->char_offset <= token->byte_offset);
-    assert(token->begin);
-    if (token->begin == token->end) {
-        if (is_char) assert(token->code == NO_CODE || token->code == EOF_CODE);
-    } else {
-        assert(size_of(token) > 0);
-        if (is_char) assert(token->code >= 0 || token->code == INVALID_CODE);
-        else         assert(' ' < token->code && token->code <= '~');
-        if (is_char || yip_code_type(token->code) != YIP_FAKE) {
-            assert(token->byte_offset + size_of(token) <= Source->byte_offset + size_of(Source));
-            assert(token->encoding == Encoding);
-            assert(token->begin >= Source->begin);
-            assert(token->end <= Source->end);
-            assert(token->byte_offset - Source->byte_offset == token->begin - Source->begin);
-        }
-    }
-    if (token->begin == Curr->begin && token->code != NO_CODE) {
+    assert(token->buffer->begin);
+    if (token->buffer->begin == Curr->buffer->begin && token->code != NO_CODE) {
         assert(token->byte_offset == Curr->byte_offset);
         assert(token->char_offset == Curr->char_offset);
         assert(token->line == Curr->line);
         assert(token->line_char == Curr->line_char);
-        assert(!size_of(token) || token->end == Curr->end);
+        assert(!size_of(token->buffer) || token->buffer->end == Curr->buffer->end);
         assert(token->encoding == Encoding);
+    }
+}
+
+/* Assert invariant always held by tokens. */
+static void token_invariant(const YIP *yip, const YIP_TOKEN *token) {
+    token_char_invariant(yip, token);
+    if (size_of(token->buffer)) assert(' ' < token->code && token->code <= '~');
+    if (yip_code_type(token->code) != YIP_FAKE) {
+        assert(token->byte_offset + size_of(token->buffer) <= Source->byte_offset + size_of(Source->buffer));
+        assert(token->encoding == Encoding);
+        assert(token->buffer->begin >= Source->buffer->begin);
+        assert(token->buffer->end <= Source->buffer->end);
+        assert(token->byte_offset - Source->byte_offset == token->buffer->begin - Source->buffer->begin);
+    }
+}
+
+/* Assert invariant always held by characters posing as tokens. */
+static void char_invariant(const YIP *yip, const YIP_TOKEN *token) {
+    token_char_invariant(yip, token);
+    if (!size_of(token->buffer)) assert(token->code == NO_CODE || token->code == EOF);
+    else {
+        assert(token->code >= 0 || token->code == INVALID_CODE);
+        assert(token->byte_offset + size_of(token->buffer) <= Source->byte_offset + size_of(Source->buffer));
+        assert(token->encoding == Encoding);
+        assert(token->buffer->begin >= Source->buffer->begin);
+        assert(token->buffer->end <= Source->buffer->end);
+        assert(token->byte_offset - Source->byte_offset == token->buffer->begin - Source->buffer->begin);
     }
 }
 
@@ -780,13 +846,11 @@ static void frame_invariant(const YIP *yip, const FRAME *frame) {
     const CHAR *prev_char = frame->prev;
     const YIP_TOKEN *curr = curr_char->token;
     const YIP_TOKEN *prev = prev_char->token;
-    is_char = 1;
-    token_invariant(yip, curr);
-    token_invariant(yip, prev);
-    is_char = 0;
-    if (curr->begin == prev->begin) {
-        if (!size_of(curr)) assert(!size_of(prev));
-        else if (size_of(prev)) assert(!memcmp(curr_char, prev_char, sizeof(*curr_char)));
+    char_invariant(yip, curr);
+    char_invariant(yip, prev);
+    if (curr->buffer->begin == prev->buffer->begin) {
+        if (!size_of(curr->buffer)) assert(!size_of(prev->buffer));
+        else if (size_of(prev->buffer)) assert(!memcmp(curr_char, prev_char, sizeof(*curr_char)));
     }
     if (frame == Frame) {
         assert(frame->tokens_depth == -1);
@@ -814,7 +878,7 @@ static void yip_invariant(const YIP *yip/*, const char *file, int line, const ch
     stack_invariant(Codes, NULL, NULL);
     stack_invariant(Tokens, token_invariant, yip);
     stack_invariant(Frames, frame_invariant, yip);
-    if (yip_code_type(Token->code) != YIP_FAKE) assert(Token->end == Curr->begin);
+    if (yip_code_type(Token->code) != YIP_FAKE) assert(Token->buffer->end == Curr->buffer->begin);
     assert(Next_return_token <= depth_of(Tokens));
     assert(Next_return_token >= 0 || Token->code == YIP_UNPARSED || Token->code == Code);
     /*fprintf(stderr, " OK\n");*/
@@ -978,11 +1042,8 @@ int yip_decode(YIP_ENCODING encoding, const unsigned char **begin, const unsigne
 
 /* Data for rebasing buffers. */
 typedef struct REBASE {
-    struct {
-        const unsigned char *begin;     /* Original buffer start. */
-        const unsigned char *end;       /* Original buffer end (for asserions). */
-    } before[1],                  /* Before rebase. */
-    after[1];                     /* After rebase. */
+    YIP_BUFFER before[1]; /* Buffer before rebase. */
+    YIP_BUFFER after[1];  /* Buffer after rebase. */
 } REBASE;
 
 static void rebase_invariant(const REBASE *rebase) {
@@ -1006,8 +1067,8 @@ static const unsigned char *rebase_pointer(const unsigned char *old_pointer, con
 
 /* Move token's relative pointers to "the same place" after the buffer was realocated to a new address. */
 static void rebase_token(YIP_TOKEN *token, const REBASE *rebase) {
-    token->begin = rebase_pointer(token->begin, rebase);
-    token->end = rebase_pointer(token->end, rebase);
+    token->buffer->begin = rebase_pointer(token->buffer->begin, rebase);
+    token->buffer->end = rebase_pointer(token->buffer->end, rebase);
 }
 
 /* Move stack frame's relative pointers to "the same place" after the buffer was realocated to a new address. */
@@ -1019,30 +1080,30 @@ static void rebase_frame(FRAME *frame, const REBASE *rebase) {
 /* Move to the next input character. */
 static int next_char(YIP *yip) {
     static const int MAX_UTF_SIZE = 6; /* UTF8 goes up to 6 bytes. */
-    REBASE rebase[1] = { { { { Source->begin, Source->end } }, { { NULL, NULL } } } };
+    REBASE rebase[1] = { { { { Source->buffer->begin, Source->buffer->end } }, { { NULL, NULL } } } };
     if (Curr->code != NO_CODE) yip_invariant(yip);
-    if (Curr->code == EOF_CODE) return 0;
-    assert(Token->end == Curr->begin);
+    if (Curr->code == EOF) return 0;
+    assert(Token->buffer->end == Curr->buffer->begin);
     assert(Token->code != NO_CODE || Curr->code == NO_CODE);
     *Prev_char = *Curr_char;
-    Curr->byte_offset += size_of(Curr);
+    Curr->byte_offset += size_of(Curr->buffer);
     Curr->char_offset++;
     Curr->line_char++;
-    Curr->begin = Curr->end;
-    Token->end = Curr->begin;
+    Curr->buffer->begin = Curr->buffer->end;
+    Token->buffer->end = Curr->buffer->begin;
     if (!Did_see_eof && Curr->byte_offset + MAX_UTF_SIZE > end_offset(Source) && Source->more(Source, DYNAMIC_BUFFER_SIZE) < 0) return -1;
-    if (rebase->before->begin != Source->begin) {
-        rebase->after->begin = Source->begin;
-        rebase->after->end = Source->end;
+    if (rebase->before->begin != Source->buffer->begin) {
+        rebase->after->begin = Source->buffer->begin;
+        rebase->after->end = Source->buffer->end;
         rebase_invariant(rebase);
         stack_apply(Tokens, rebase_token, rebase);
         stack_apply(Frames, rebase_frame, rebase);
     }
-    if (Curr->begin == Source->end) {
+    if (Curr->buffer->begin == Source->buffer->end) {
         Did_see_eof = 1;
-        Curr->code = EOF_CODE;
+        Curr->code = EOF;
     } else {
-        Curr->code = yip_decode(Encoding, &Curr->end, Source->end);
+        Curr->code = yip_decode(Encoding, &Curr->buffer->end, Source->buffer->end);
     }
     Curr_char->mask = code_mask(Curr->code);
     if ((Prev->code < 0 || Prev->code == 0xFFFF) && Prev_char->mask & START_OF_LINE_MASK) Curr_char->mask |= START_OF_LINE_MASK;
@@ -1056,7 +1117,7 @@ static void prev_char(YIP *yip) {
     yip_invariant(yip);
     assert(Prev->code != NO_CODE);
     *Curr_char = *Prev_char;
-    Token->end = Curr->begin;
+    Token->buffer->end = Curr->buffer->begin;
     yip_invariant(yip);
 }
 */
@@ -1078,7 +1139,7 @@ static YIP *yip_init(YIP_SOURCE *source, int to_close, MACHINE machine, const YI
         if (!yip) return NULL;
         if ((Encoding = detect_encoding(source)) < 0) {
             errno = EILSEQ;
-            yip_free(yip);
+            yip_close(yip);
             return NULL;
         }
         Source = source;
@@ -1092,7 +1153,7 @@ static YIP *yip_init(YIP_SOURCE *source, int to_close, MACHINE machine, const YI
          || stack_init(Codes, production ? 1 : 128) < 0
          || stack_init(Tokens, production ? 1 : 128) < 0
          || stack_init(Frames, production ? 1 : 128) < 0) {
-            yip_free(yip);
+            yip_close(yip);
             return NULL;
         }
         Code = YIP_UNPARSED;
@@ -1102,19 +1163,19 @@ static YIP *yip_init(YIP_SOURCE *source, int to_close, MACHINE machine, const YI
         Curr->char_offset = -1;
         Curr->line = 1;
         Curr->line_char = -1;
-        Curr->begin = Curr->end = Source->begin;
+        Curr->buffer->begin = Curr->buffer->end = Source->buffer->begin;
         Curr->encoding = Encoding;
         Curr->code = NO_CODE;
         Curr_char->mask = START_OF_LINE_MASK;
         *Prev_char = *Curr_char;
         *Token = *Curr;
         if (next_char(yip) < 0) {
-            yip_free(yip);
+            yip_close(yip);
             return NULL;
         }
         *Token = *Curr;
         Token->code = YIP_UNPARSED;
-        Token->end = Token->begin;
+        Token->buffer->end = Token->buffer->begin;
         yip_invariant(yip);
         return yip;
     }
@@ -1127,7 +1188,7 @@ static RETURN begin_token(YIP *yip, YIP_CODE code) {
     assert(yip_code_type(code) == YIP_MATCH || code == YIP_BOM);
     if (stack_push(Codes) < 0) return RETURN_ERROR;
     Code = code;
-    if (Token->begin == Token->end) {
+    if (!size_of(Token->buffer)) {
         Token->code = code;
         yip_invariant(yip);
         return RETURN_DONE;
@@ -1140,7 +1201,7 @@ static RETURN begin_token(YIP *yip, YIP_CODE code) {
     }
     if (stack_push(Tokens) < 0) return RETURN_ERROR;
     *Token = *Curr;
-    Token->end = Token->begin;
+    Token->buffer->end = Token->buffer->begin;
     Token->code = code;
     return RETURN_DONE;
 }
@@ -1152,15 +1213,15 @@ static RETURN end_token(YIP *yip, YIP_CODE code) {
     assert(code == Token->code || code == YIP_UNPARSED);
     if (depth_of(Codes) == 1) assert(Code == YIP_UNPARSED);
     else stack_pop(Codes);
-    if (Token->begin == Token->end) {
+    if (!size_of(Token->buffer)) {
         Token->code = Code;
         yip_invariant(yip);
         return RETURN_DONE;
     }
     Token->code = code;
     if (Token->code == YIP_BOM) {
-        Token->begin = (const unsigned char *)encoding_names[Token->encoding] + 1;
-        Token->end = Token->begin + strlen((const char *)Token->begin);
+        Token->buffer->begin = (const unsigned char *)encoding_names[Token->encoding] + 1;
+        Token->buffer->end = Token->buffer->begin + strlen((const char *)Token->buffer->begin);
         Token->encoding = YIP_UTF8;
     }
     if (depth_of(Frames) == 1) {
@@ -1171,7 +1232,7 @@ static RETURN end_token(YIP *yip, YIP_CODE code) {
     }
     if (stack_push(Tokens) < 0) return RETURN_ERROR;
     *Token = *Curr;
-    Token->end = Token->begin;
+    Token->buffer->end = Token->buffer->begin;
     Token->code = Code;
     yip_invariant(yip);
     return RETURN_DONE;
@@ -1183,15 +1244,15 @@ static RETURN fake_token(YIP *yip, YIP_CODE code, const char *text) {
     assert(Next_return_token < 0);
     if (text) assert(yip_code_type(code) == YIP_FAKE);
     else      assert(code == YIP_DONE || yip_code_type(code) == YIP_BEGIN || yip_code_type(code) == YIP_END);
-    if (Token->begin != Token->end) {
+    if (size_of(Token->buffer)) {
         if (stack_push(Tokens) < 0) return RETURN_ERROR;
         *Token = *Curr;
-        Token->end = Token->begin;
+        Token->buffer->end = Token->buffer->begin;
     }
     Token->code = code;
     if (text) {
-        Token->begin = (const unsigned char *)text;
-        Token->end = Token->begin + strlen(text);
+        Token->buffer->begin = (const unsigned char *)text;
+        Token->buffer->end = Token->buffer->begin + strlen(text);
     }
     if (depth_of(Frames) == 1) {
         assert(depth_of(Tokens) <= 2);
@@ -1201,7 +1262,7 @@ static RETURN fake_token(YIP *yip, YIP_CODE code, const char *text) {
     }
     if (stack_push(Tokens) < 0) return RETURN_ERROR;
     *Token = *Curr;
-    Token->end = Token->begin;
+    Token->buffer->end = Token->buffer->begin;
     Token->code = Code;
     yip_invariant(yip);
     return RETURN_DONE;
@@ -1216,7 +1277,7 @@ static RETURN empty_token(YIP *yip, YIP_CODE code) {
 static RETURN unexpected(YIP *yip) {
     static char buffer[24];
     if (Curr->code == INVALID_CODE) return fake_token(yip, YIP_ERROR, "Invalid byte sequence");
-    if (Curr->code == EOF_CODE)     return fake_token(yip, YIP_ERROR, "Unexpected end of input");
+    if (Curr->code == EOF)          return fake_token(yip, YIP_ERROR, "Unexpected end of input");
     if (Curr->code == '\'')         return fake_token(yip, YIP_ERROR, "Unexpected \"'\"");
     if (' ' <= Curr->code && Curr->code <= '~') sprintf((char *)buffer, "Unexpected '%c'", Curr->code);
     else if (Curr->code <= 0xFF)                sprintf((char *)buffer, "Unexpected '\\x%02x'", Curr->code);
@@ -1233,7 +1294,7 @@ static RETURN commit(YIP *yip, CHOICE choice) {
 /* Push current state for backtracking. */
 static int push_state(YIP *yip) {
     yip_invariant(yip);
-    assert(Token->begin == Token->end);
+    assert(!size_of(Token->buffer));
     assert(Token->code == YIP_UNPARSED);
     if (stack_push(Frames) < 0) return -1;
     Frame[0] = Frame[-1];
@@ -1247,7 +1308,7 @@ static int push_state(YIP *yip) {
 static RETURN set_state(YIP *yip) {
     yip_invariant(yip);
     assert(depth_of(Frames) > 1);
-    assert(Token->begin == Token->end);
+    assert(!size_of(Token->buffer));
     assert(Token->code == YIP_UNPARSED);
     Frame[-1] = Frame[0];
     Frame[-1].codes_depth = depth_of(Codes);
@@ -1266,14 +1327,14 @@ static RETURN set_state(YIP *yip) {
 /* Backtrack to a previous state. */
 static void reset_state(YIP *yip) {
     yip_invariant(yip);
-    assert(Token->begin == Token->end);
+    assert(!size_of(Token->buffer));
     assert(Token->code == YIP_UNPARSED);
     assert(depth_of(Frames) > 1);
     Frame[0] = Frame[-1];
     Codes->top = Codes->begin + Frame->codes_depth - 1;
     Token = Tokens->begin + Frame->tokens_depth - 1;
     *Token = *Curr;
-    Token->end = Token->begin;
+    Token->buffer->end = Token->buffer->begin;
     Token->code = Code;
     Frame->tokens_depth = -1;
     Frame->codes_depth = -1;
@@ -1283,7 +1344,7 @@ static void reset_state(YIP *yip) {
 /* End backtracking keeping the current state. */
 static RETURN pop_state(YIP *yip) {
     yip_invariant(yip);
-    assert(Token->begin == Token->end);
+    assert(!size_of(Token->buffer));
     assert(Token->code == YIP_UNPARSED);
     assert(depth_of(Frames) > 1);
     Frame[-1] = Frame[0];
@@ -1353,13 +1414,13 @@ YIP *yip_test(YIP_SOURCE *source, int to_close, const YIP_PRODUCTION *production
 }
 
 /* Release a YIP parser object and release all allocated resources. */
-int yip_free(YIP *yip) {
+int yip_close(YIP *yip) {
     YIP_SOURCE *source = Source;
     int to_close = To_close;
     yip_invariant(yip);
-    stack_free(Codes);
-    stack_free(Frames);
-    stack_free(Tokens);
+    stack_close(Codes);
+    stack_close(Frames);
+    stack_close(Tokens);
     free(yip);
     if (to_close) return source->close(source);
     return 0;
@@ -1384,7 +1445,7 @@ static void last_token(YIP *yip) {
     Next_return_token = -1;
     Token = Tokens->begin;
     *Token = *Curr;
-    Token->end = Token->begin;
+    Token->buffer->end = Token->buffer->begin;
     Token->code = Code;
     yip_invariant(yip);
 }

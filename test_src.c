@@ -9,6 +9,7 @@
 #   define O_BINARY 0
 #endif /* O_BINARY */
 
+/* The input data. */
 static const char *input_path = "-";
 static char *input_data = NULL;
 static long input_size = -1;
@@ -83,14 +84,14 @@ static void test_source(YIP_SOURCE *source) {
         int status = source->more(source, MORE_SIZE);
         if (status < 0) die("yip_source_more");
         else if (status == 0) {
-            if (write(1, source->begin, source->end - source->begin) < 0)
+            if (write(1, source->buffer->begin, source->buffer->end - source->buffer->begin) < 0)
                 die("write");
             if (source->close(source) < 0) die("close");
             return;
         }
-        while (source->end - source->begin > KEEP_SIZE) {
+        while (source->buffer->end - source->buffer->begin > KEEP_SIZE) {
             long less_size = LESS_SIZE;
-            if (write(1, source->begin, less_size) < 0) die("write");
+            if (write(1, source->buffer->begin, less_size) < 0) die("write");
             if (source->less(source, less_size) < 0) die("yip_source_less");
         }
     }

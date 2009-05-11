@@ -42,7 +42,7 @@ static YIP_SOURCE *read_path(char *path) {
     }
 }
 
-static int are_identical(YIP_SOURCE *left, YIP_SOURCE *right) {
+static int are_identical(YIP_BUFFER *left, YIP_BUFFER *right) {
     long left_size = left->end - left->begin;
     long right_size = right->end - right->begin;
     if (left_size != right_size) return 0;
@@ -58,7 +58,7 @@ static void check_test_results(char *path) {
         return;
     } else {
         YIP_SOURCE *error_src = read_path(set_suffix(path, ".error"));
-        if (!are_identical(error_src, output_src)) {
+        if (!are_identical(error_src->buffer, output_src->buffer)) {
             failed++;
             fprintf(stderr, "failed: unexpected output\n");
         } else {
@@ -88,10 +88,10 @@ static void run_test_file(YIP *yip, char *path) {
         if (token->code == YIP_DONE) break;
         fprintf(error_fp, "# B: %ld, C: %ld, L: %ld, c: %ld\n", token->byte_offset, token->char_offset, token->line, token->line_char);
         fputc(token->code, error_fp);
-        if (token->begin) {
-            unsigned const char *begin = token->begin;
-            while (begin != token->end) {
-                int code = yip_decode(token->encoding, &begin, token->end);
+        if (token->buffer->begin) {
+            unsigned const char *begin = token->buffer->begin;
+            while (begin != token->buffer->end) {
+                int code = yip_decode(token->encoding, &begin, token->buffer->end);
                 assert(code >= 0);
                 if (' ' <= code && (token->code == YIP_ERROR || code != '\\') && code <= '~') fputc(code, error_fp);
                 else if (code <= 0xFF)   fprintf(error_fp, "\\x%02x", code);
@@ -154,7 +154,7 @@ static void confirmed_test_file(char *path, char *file) {
             return;
         }
         run_test_file(yip, path);
-        if (yip_free(yip) < 0) {
+        if (yip_close(yip) < 0) {
             perror(file);
             exit(1);
         }
