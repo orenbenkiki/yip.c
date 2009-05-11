@@ -7,9 +7,11 @@ divert(2)dnl
 /* }}} */
 divert(-1)
 
-define(`LineFeed', `Line_Feed')
+define(`BeginComment', `Begin_Comment')
 define(`BeginEscape', `Begin_Escape')
+define(`EndComment', `End_Comment')
 define(`EndEscape', `End_Escape')
+define(`LineFeed', `Line_Feed')
 define(`LineFold', `Line_Fold')
 
 define(`BEGIN_MACHINE', `
