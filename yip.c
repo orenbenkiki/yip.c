@@ -858,7 +858,7 @@ static void frame_invariant(const YIP *yip, const FRAME *frame) {
     } else {
         assert(frame->tokens_depth > 0);
         assert(frame->codes_depth > 0);
-        assert(frame->tokens_depth <= depth_of(Frames));
+        assert(frame->tokens_depth <= depth_of(Tokens));
         assert(frame->codes_depth <= depth_of(Codes));
     }
 }
@@ -1359,6 +1359,13 @@ static RETURN pop_state(YIP *yip) {
     Next_return_token = 0;
     yip_invariant(yip);
     return RETURN_TOKEN;
+}
+
+/* Test whether current state has changed from pushed state. */
+static int is_same_state(YIP *yip) {
+    yip_invariant(yip);
+    assert(depth_of(Frames) > 1);
+    return Curr->buffer->begin == Frame[-1].curr->token->buffer->begin;
 }
 
 /* }}} */

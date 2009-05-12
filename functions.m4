@@ -216,6 +216,18 @@ divert(-1)
 define(`TRANSITION_PREFIX', ` else ')
 ')
 
+define(`IS_SAME_STATE', `
+define(`IS_ALWAYS', `NO')
+divert(1)dnl
+TRANSITION_PREFIX`'if (is_same_state(yip)) {
+divert(-1)
+GOTO_STATE(`                ')
+divert(1)dnl
+            }dnl
+divert(-1)
+define(`TRANSITION_PREFIX', ` else ')
+')
+
 define(`BEGIN_CLASSES', `
 define(`IS_ALWAYS', `NO')
 define(`PREFIX', `')
